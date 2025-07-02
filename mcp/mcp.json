@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "cmcd-mcp": {
+      "command": "python3",
+      "args": ["/Users/shamksh/Documents/devspace/cmcd-mcp/mcp/cmcd_server.py"]
+    }
+  }
+}
