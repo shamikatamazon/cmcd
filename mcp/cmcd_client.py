@@ -108,7 +108,20 @@ class CMCDClient:
             "content": [{"text": query}]
         }]
 
-        system_prompts = [{"text": "You are a CMCD streaming analytics assistant. Use the available tools to analyze streaming media performance data."}]
+        # Get server prompts for better context
+        server_prompt = "You are a CMCD streaming analytics assistant. Use the available tools to analyze streaming media performance data."
+        try:
+            prompts_response = await session.list_prompts()
+            prompts = prompts_response.prompts if hasattr(prompts_response, 'prompts') else prompts_response
+            if prompts:
+                # Use the first available prompt from server
+                prompt_result = await session.get_prompt(prompts[0].name, {})
+                if hasattr(prompt_result, 'messages') and prompt_result.messages:
+                    server_prompt = prompt_result.messages[0].content.text
+        except Exception as e:
+            logger.debug(f"Using default prompt: {e}")
+        
+        system_prompts = [{"text": server_prompt}]
         final_text = []
 
         while True:
@@ -152,6 +165,32 @@ class CMCDClient:
             name = tool.name if hasattr(tool, 'name') else tool.get('name', 'Unknown')
             desc = tool.description if hasattr(tool, 'description') else tool.get('description', 'No description')
             print(f"{i}. {name}: {desc}")
+        
+        # List available prompts
+        try:
+            prompts_response = await session.list_prompts()
+            prompts = prompts_response.prompts if hasattr(prompts_response, 'prompts') else prompts_response
+            if prompts:
+                print("\nAvailable prompts:")
+                for i, prompt in enumerate(prompts, 1):
+                    name = prompt.name if hasattr(prompt, 'name') else prompt.get('name', 'Unknown')
+                    desc = prompt.description if hasattr(prompt, 'description') else prompt.get('description', 'No description')
+                    print(f"{i}. {name}: {desc}")
+        except Exception as e:
+            logger.debug(f"No prompts available: {e}")
+        
+        # List available resources
+        try:
+            resources_response = await session.list_resources()
+            resources = resources_response.resources if hasattr(resources_response, 'resources') else resources_response
+            if resources:
+                print("\nAvailable resources:")
+                for i, resource in enumerate(resources, 1):
+                    uri = resource.uri if hasattr(resource, 'uri') else resource.get('uri', 'Unknown')
+                    name = resource.name if hasattr(resource, 'name') else resource.get('name', uri)
+                    print(f"{i}. {name} ({uri})")
+        except Exception as e:
+            logger.debug(f"No resources available: {e}")
         
         logger.info("Type your queries or 'quit' to exit.")
 
