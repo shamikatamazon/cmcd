@@ -24,8 +24,8 @@ from loguru import logger
 
 # Configure logger
 logger.remove()
-logger.add(sys.stderr, level="DEBUG")
-logger.add("cmcd_server.log", rotation="10 MB", level="DEBUG")
+logger.add(sys.stderr, level="INFO")
+logger.add("cmcd_server.log", rotation="10 MB", level="INFO")
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from typing import Any, Dict, List, Optional
@@ -105,6 +105,38 @@ def get_influxdb_client(url, token, org=None, timeout=10000, verify_ssl: bool = 
     return InfluxDBClient(
         url=url, token=token, org=org_param, timeout=timeout, verify_ssl=verify_ssl
     )
+
+@mcp.prompt()
+def cmcd_prompt() -> str:
+    """ Generates a prompt to query the CMCD server for data """
+    prompt = """You are a data analyst specializing in streaming media analytics. Your task is to create a Flux query for InfluxDB to analyze Common Media Client Data (CMCD).
+
+Given the following information:
+
+CMCD data is stored in an InfluxDB database named 'cmcd-metrics'
+The measurement (table) name is 'cloudfront_logs'
+CMCD fields are: 'cmcd_bl', 'cmcd_br', 'cmcd_d', 'cmcd_mtp', 'cmcd_su', 'cmcd_tb', 'time_taken'
+the default Time range for the query is the last 24 hours if the input prompt does not contain a time range
+Create a Flux query that:
+
+Selects data from the 'cmcd-metrics' measurement
+Filters for the last 24 hours if the input prompt does not contain a time range
+Your query should be optimized for InfluxDB and follow best practices for Flux syntax. Please provide explanations for each step of the query.
+the default aggregation should be average (mean). If its not clear how to aggregate data, respond to the user asking for more
+
+To use this CMCD server you have to first get the CMCD spec from the MCP resoruces (get_cmcd_spec) and once you have it, use the prompt and the spec to understand what the user wants. 
+After that create a flux query using the schema described above and then execute the flux query using the influxdb_query method
+
+"""
+
+    return prompt
+
+
+@mcp.resource("file://cta-5004-final.pdf", mime_type="application/pdf")
+def get_cmcd_spec():
+    """Returns the content of cta-5004-final.pdf."""
+    with open("cta-5004-final.pdf", "rb") as f:
+        return f.read()
 
 async def get_cmcd_data(query: str, url: str = INFLUXDB_URL, token: str = INFLUXDB_TOKEN, 
                       org: str = INFLUXDB_ORG, verify_ssl: bool = VERIFY_SSL) -> Dict[str, Any]:
