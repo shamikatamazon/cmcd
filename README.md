@@ -42,13 +42,79 @@ This MCP server connects to InfluxDB containing CMCD telemetry data and provides
 - Valid InfluxDB credentials
 - HLS video file (.m3u8) for testing CMCD data generation
 
+## AWS Infrastructure Deployment
+
+### Deploy the CMCD Pipeline
+
+The complete CMCD analytics pipeline is deployed using AWS CloudFormation, which creates:
+
+- **Amazon S3** - Video content storage
+- **Amazon CloudFront** - CDN with CMCD log collection
+- **AWS Lambda** - Log processing functions
+- **Amazon Timestream for InfluxDB** - CMCD metrics storage
+- **Amazon EC2** - Bastion host for secure database access
+- **Amazon Kinesis Data Firehose** - Real-time log streaming
+
+### Prerequisites for Deployment
+
+- AWS CLI configured with appropriate permissions
+- AWS account with sufficient service limits
+- VPC with public and private subnets (or use default VPC)
+
+### Deploy CloudFormation Stack
+
+1. **Clone the Repository**:
+   ```bash
+   git clone <repository-url>
+   cd cmcd-mcp
+   ```
+
+2. **Deploy the Stack**:
+   ```bash
+   aws cloudformation create-stack \
+     --stack-name cmcd-analytics-pipeline \
+     --template-body file://cloudformation/cmcd-pipeline.yaml \
+     --parameters ParameterKey=Environment,ParameterValue=dev \
+     --capabilities CAPABILITY_IAM
+   ```
+
+3. **Monitor Deployment**:
+   ```bash
+   aws cloudformation describe-stacks --stack-name cmcd-analytics-pipeline
+   ```
+
+4. **Get Stack Outputs**:
+   ```bash
+   aws cloudformation describe-stacks \
+     --stack-name cmcd-analytics-pipeline \
+     --query 'Stacks[0].Outputs'
+   ```
+
+### Key CloudFormation Outputs
+
+| Output | Description | Usage |
+|--------|-------------|-------|
+| `InfluxDBEndpoint` | InfluxDB connection URL | MCP server configuration |
+| `InfluxDBToken` | Database authentication token | MCP server configuration |
+| `InfluxDBOrg` | Organization name | MCP server configuration |
+| `S3BucketName` | Video content bucket | Upload HLS files |
+| `CloudFrontDomain` | CDN domain | Video playback URLs |
+| `BastionInstanceId` | EC2 bastion host ID | SSM connection |
+
 ## Quick Start
 
-### 1. Clone and Install
+### 1. Set Up Virtual Environment
 
 ```bash
-git clone <repository-url>
-cd cmcd-mcp
+# Create virtual environment
+python -m venv cmcd-mcp-env
+
+# Activate virtual environment
+source cmcd-mcp-env/bin/activate  # On macOS/Linux
+# or
+cmcd-mcp-env\Scripts\activate     # On Windows
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
@@ -96,11 +162,7 @@ curl -H "Authorization: Token $INFLUXDB_TOKEN" \
 influx bucket list --host $INFLUXDB_URL --token $INFLUXDB_TOKEN --org $INFLUXDB_ORG
 ```
 
-### 4. Run the Server
 
-```bash
-python mcp/cmcd_server.py
-```
 
 ## Data Schema
 
@@ -212,37 +274,61 @@ The CloudFormation template creates an S3 bucket for video content accessible vi
    - The player automatically sends CMCD parameters to CloudFront
    - Streaming telemetry data will be collected and processed into InfluxDB
 
-## Usage Examples
+## Integration with Amazon Q CLI
 
-### Basic Bitrate Analysis
-```python
-# Get average bitrate for the last hour
-result = await get_average_bitrate(time_range="-1h")
+To use this MCP server with Amazon Q CLI, you need to configure the MCP client settings:
+
+### Option 1: Copy to Q CLI Directory
+
+```bash
+# Copy the MCP configuration to Q CLI directory
+cp mcp.json ~/.q/mcp.json
 ```
 
-### Session-Specific Analysis
-```python
-# Analyze specific session
-result = await get_session_details(cmcd_sid="session_abc123")
+### Option 2: Create .amazonq Directory
+
+```bash
+# Create .amazonq directory in your project root
+mkdir .amazonq
+cp mcp.json .amazonq/mcp.json
 ```
 
-### Buffer Event Detection
-```python
-# Find rebuffering events with custom threshold
-result = await analyze_buffer_events(
-    time_range="-6h", 
-    threshold_ms=1000
-)
+### MCP Configuration (mcp.json)
+
+```json
+{
+  "mcpServers": {
+    "cmcd-analytics": {
+      "command": "./cmcd-mcp-env/bin/python",
+      "args": ["mcp/cmcd_server.py"],
+      "env": {
+        "INFLUXDB_URL": "your-influxdb-url",
+        "INFLUXDB_TOKEN": "your-token",
+        "INFLUXDB_ORG": "your-org"
+      }
+    }
+  }
+}
 ```
 
-## Integration with MCP Clients
+### Running Amazon Q CLI
 
-This server is designed to work with MCP-compatible AI assistants and tools. The structured responses enable AI systems to:
+Ensure Amazon Q CLI also runs in the virtual environment:
 
-- Analyze streaming performance trends
-- Identify quality issues automatically
-- Generate insights about user experience
-- Correlate metrics across sessions and content
+```bash
+# Activate virtual environment
+source cmcd-mcp-env/bin/activate
+
+# Run Q CLI
+q dev
+```
+
+Once configured, Amazon Q can analyze your CMCD streaming data and provide insights about:
+
+- Streaming performance trends
+- Quality issues and their root causes
+- User experience metrics
+- Session and content correlations
 
 ## Troubleshooting
 
