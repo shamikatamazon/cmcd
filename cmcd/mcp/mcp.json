@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "cmcd-mcp": {
+      "command": "python3",
+      "args": [
+        "cmcd_server.py"
+      ],
+      "cwd": "/home/ec2-user/cmcd/mcp",
+      "env": {
+        "FASTMCP_LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}
