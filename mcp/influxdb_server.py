@@ -49,11 +49,21 @@ VERIFY_SSL = os.getenv('VERIFY_SSL', 'False').lower() == 'true'
 REQUIRED_FIELD_QUERY = Field(..., description='The Flux query string.')
 
 mcp = FastMCP(
-    'awslabs.timestream-for-influxdb-mcp-server',
+    'cmcd-influxdb-mcp-server',
     instructions="""
-    This MCP server provides tools to interact with CMCD data on the influxdb database. Use the tools in this server to create a query for a complex query for the CMCD data. 
-
-    the bucketname on influx-db is cmcd-metrics.
+    Direct InfluxDB query interface for Common Media Client Data (CMCD) analytics.
+    
+    This server provides raw Flux query execution against CMCD streaming telemetry data stored in InfluxDB.
+    Use this when you need custom queries beyond the pre-built analytics tools in the main CMCD server.
+    
+    Data Schema:
+    - Bucket: cmcd-metrics
+    - Measurement: cloudfront_logs
+    - Fields: cmcd_bl (buffer length), cmcd_br (bitrate), cmcd_bs (buffer starved), 
+             cmcd_d (duration), cmcd_mtp (throughput), cmcd_su (startup), cmcd_tb (top bitrate)
+    - Tags: cmcd_sid (session ID), cmcd_cid (content ID), edge_location
+    
+    Requires Flux query language knowledge. For common analytics, use the main CMCD MCP server instead.
     """,
     dependencies=['loguru', 'boto3', 'influxdb-client'],
 )
