@@ -241,74 +241,6 @@ If the SSM connection which was started previously has closed, then start the se
 
   Keep this terminal window open as it maintains the tunnel connection.
 
-## Data Schema
-
-The server expects CMCD data in InfluxDB with the following structure:
-
-| Component | Value | Description |
-|-----------|-------|-------------|
-| **Bucket** | `cmcd-metrics` | InfluxDB bucket containing CMCD data |
-| **Measurement** | `cloudfront_logs` | Primary measurement name |
-
-### CMCD Fields
-
-| Field | Description | Unit |
-|-------|-------------|------|
-| `cmcd_bl` | Buffer length | milliseconds |
-| `cmcd_br` | Encoded bitrate | kbps |
-| `cmcd_d` | Segment duration | milliseconds |
-| `cmcd_su` | Startup flag | boolean |
-| `cmcd_tb` | Top bitrate | kbps |
-| `cmcd_bs` | Buffer starved flag | boolean |
-| `cmcd_mtp` | Measured throughput | kbps |
-
-### Tags
-
-| Tag | Description |
-|-----|-------------|
-| `cmcd_sid` | Session identifier |
-| `cmcd_cid` | Content identifier |
-| `edge_location` | CDN edge location |
-
-## Available Tools
-
-### `get_average_bitrate`
-Calculates average bitrate over specified time ranges with optional filtering.
-
-**Parameters:**
-- `time_range` (default: "-24h"): Time range for analysis
-- `cmcd_sid` (optional): Filter by session ID
-- `cmcd_cid` (optional): Filter by content ID
-
-### `get_session_details`
-Retrieves comprehensive metrics timeline for a specific session.
-
-**Parameters:**
-- `cmcd_sid` (required): Session ID to analyze
-- `time_range` (default: "-24h"): Time range for analysis
-
-### `analyze_buffer_events`
-Identifies potential rebuffering events based on buffer level thresholds.
-
-**Parameters:**
-- `time_range` (default: "-24h"): Time range for analysis
-- `cmcd_sid` (optional): Filter by session ID
-- `threshold_ms` (default: 500): Buffer level threshold in milliseconds
-
-### `identify_playback_errors`
-Detects various playback issues including buffer underruns and startup delays.
-
-**Parameters:**
-- `time_range` (default: "-24h"): Time range for analysis
-- `cmcd_sid` (optional): Filter by session ID
-
-### `list_session_and_content_ids`
-Enumerates unique session and content identifiers in the dataset.
-
-**Parameters:**
-- `time_range` (default: "-24h"): Time range for analysis
-- `limit` (default: 100): Maximum number of IDs to return
-
 ## Integration with Amazon Q CLI
 
 To use this MCP server with Amazon Q CLI, you need to configure the MCP client settings:
@@ -333,13 +265,12 @@ cp mcp.json .amazonq/mcp.json
 ```json
 {
   "mcpServers": {
-    "cmcd-analytics": {
-      "command": "./cmcd-mcp-env/bin/python",
-      "args": ["mcp/cmcd_server.py"],
+    "cmcd-mcp": {
+      "command": "python3",
+      "args": ["cmcd_server.py"],
+      "cwd": "<DIRECTORY_PATH>/mcp",
       "env": {
-        "INFLUXDB_URL": "your-influxdb-url",
-        "INFLUXDB_TOKEN": "your-token",
-        "INFLUXDB_ORG": "your-org"
+        "FASTMCP_LOG_LEVEL": "INFO"
       }
     }
   }
@@ -438,6 +369,75 @@ Based on the data I've gathered, here are the key insights on streaming performa
 
 The streaming service is performing adequately with good bitrates, but the buffer stability could be improved to provide a more consistent viewing experience.
 ```
+
+## Data Schema
+
+The server expects CMCD data in InfluxDB with the following structure:
+
+| Component | Value | Description |
+|-----------|-------|-------------|
+| **Bucket** | `cmcd-metrics` | InfluxDB bucket containing CMCD data |
+| **Measurement** | `cloudfront_logs` | Primary measurement name |
+
+### CMCD Fields
+
+| Field | Description | Unit |
+|-------|-------------|------|
+| `cmcd_bl` | Buffer length | milliseconds |
+| `cmcd_br` | Encoded bitrate | kbps |
+| `cmcd_d` | Segment duration | milliseconds |
+| `cmcd_su` | Startup flag | boolean |
+| `cmcd_tb` | Top bitrate | kbps |
+| `cmcd_bs` | Buffer starved flag | boolean |
+| `cmcd_mtp` | Measured throughput | kbps |
+
+### Tags
+
+| Tag | Description |
+|-----|-------------|
+| `cmcd_sid` | Session identifier |
+| `cmcd_cid` | Content identifier |
+| `edge_location` | CDN edge location |
+
+## Available Tools
+
+### `get_average_bitrate`
+Calculates average bitrate over specified time ranges with optional filtering.
+
+**Parameters:**
+- `time_range` (default: "-24h"): Time range for analysis
+- `cmcd_sid` (optional): Filter by session ID
+- `cmcd_cid` (optional): Filter by content ID
+
+### `get_session_details`
+Retrieves comprehensive metrics timeline for a specific session.
+
+**Parameters:**
+- `cmcd_sid` (required): Session ID to analyze
+- `time_range` (default: "-24h"): Time range for analysis
+
+### `analyze_buffer_events`
+Identifies potential rebuffering events based on buffer level thresholds.
+
+**Parameters:**
+- `time_range` (default: "-24h"): Time range for analysis
+- `cmcd_sid` (optional): Filter by session ID
+- `threshold_ms` (default: 500): Buffer level threshold in milliseconds
+
+### `identify_playback_errors`
+Detects various playback issues including buffer underruns and startup delays.
+
+**Parameters:**
+- `time_range` (default: "-24h"): Time range for analysis
+- `cmcd_sid` (optional): Filter by session ID
+
+### `list_session_and_content_ids`
+Enumerates unique session and content identifiers in the dataset.
+
+**Parameters:**
+- `time_range` (default: "-24h"): Time range for analysis
+- `limit` (default: 100): Maximum number of IDs to return
+
 
 ## Troubleshooting
 
