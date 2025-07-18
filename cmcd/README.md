@@ -1,156 +1,494 @@
-# CMCD Analytics Platform
+# CMCD MCP Server
 
-## Overview
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-The CMCD (Common Media Client Data) Analytics Platform is a comprehensive solution for capturing, processing, and analyzing streaming media performance data. This platform leverages AWS services including CloudFront, Kinesis, Lambda, and Timestream for InfluxDB to provide real-time insights into streaming media quality of experience (QoE).
+A Model Context Protocol (MCP) server for analyzing Common Media Client Data (CMCD) streaming telemetry. This server provides AI-powered analytics tools for video streaming quality of experience (QoE) analysis using data stored in InfluxDB.
 
-CMCD is a standard defined by the Consumer Technology Association (CTA) that enables media players to communicate standardized playback telemetry to content delivery networks (CDNs) and origin servers. This platform collects and analyzes this telemetry data to help optimize streaming performance.
+## What is CMCD?
+
+Common Media Client Data (CMCD) is a specification that enables media players to convey streaming performance data to content delivery networks (CDNs) and origin servers. This data helps optimize streaming delivery and provides insights into playback quality.
 
 ## Architecture
 
-The platform consists of the following components:
-
-1. **CloudFront Distribution**: Delivers streaming media content and collects CMCD metrics
-2. **Kinesis Data Stream**: Processes real-time streaming data
-3. **Lambda Function**: Transforms and loads data into InfluxDB
-4. **Timestream for InfluxDB**: Time-series database for storing and querying metrics
-5. **Bastion Host**: Provides secure access to the InfluxDB instance
-6. **MCP Server**: Model Context Protocol server that provides tools to query and analyze CMCD metrics
-
-## Key Features
-
-- Real-time collection of CMCD metrics from streaming media clients
-- Storage and analysis of streaming performance data including:
-  - Buffer levels (bl)
-  - Bitrates (br)
-  - Duration (d)
-  - Media type (mtp)
-  - Startup time (su)
-  - Target buffer (tb)
-- Interactive querying and analysis through the MCP client
-- Secure access to the database through AWS SSM tunneling
-- Comprehensive CloudFormation template for infrastructure deployment
-
-## Getting Started
-
-### Prerequisites
-
-- AWS CLI installed and configured
-- AWS Session Manager Plugin installed
-- Python 3.x
-- pip package manager
-
-### Setup
-
-1. **Deploy the CloudFormation Stack**:
-   ```
-   aws cloudformation deploy --template-file cmcd-analytics-stack.yaml --stack-name cmcd-analytics --capabilities CAPABILITY_IAM
-   ```
-
-2. **Set up the SSM Tunnel**:
-   ```
-   ./setup_tunnel.sh
-   ```
-
-3. **Configure Environment Variables**:
-   Update the `mcp/.env` file with your InfluxDB credentials and AWS configuration.
-
-4. **Test the InfluxDB Connection**:
-   ```
-   ./check_influxdb.py
-   ```
-
-### Running the MCP Server
-
-The MCP (Model Context Protocol) server provides tools to query and analyze CMCD metrics stored in InfluxDB.
+This MCP server connects to InfluxDB containing CMCD telemetry data and provides structured analytics tools that can be used by AI assistants and other MCP clients to analyze streaming performance.
 
 ```
-./run_mcp_server.sh
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   MCP Client    │───▶│   CMCD MCP       │───▶│    InfluxDB     │
+│  (AI Assistant) │    │    Server        │    │ (CMCD Metrics)  │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
 
-### Running the MCP Client
+## Features
 
-The MCP client allows you to interact with the MCP server and execute queries against the CMCD metrics.
+### 🎯 **Streaming Analytics**
+- **Average Bitrate Analysis** - Calculate mean bitrates across time ranges with session/content filtering
+- **Session Timeline Analysis** - Retrieve comprehensive session metrics and playback timelines
+- **Buffer Event Detection** - Identify rebuffering incidents and low buffer events
+- **Playback Error Analysis** - Detect buffer underruns, startup delays, and bitrate drops
+- **Session Discovery** - Enumerate unique session and content identifiers
 
+### 🔧 **Technical Capabilities**
+- Real-time streaming telemetry analysis
+- Flexible time range queries (`-1h`, `-24h`, `-7d`)
+- Session and content ID filtering
+- Structured JSON responses for AI consumption
+- Comprehensive error detection and reporting
+
+## Prerequisites
+
+- Python 3.8+
+- InfluxDB instance with CMCD data
+- Valid InfluxDB credentials
+- HLS video file (.m3u8) for testing CMCD data generation
+
+## AWS Infrastructure Deployment
+
+### Deploy the CMCD Pipeline
+
+The complete CMCD analytics pipeline is deployed using AWS CloudFormation, which creates:
+
+- **Amazon S3** - Video content storage
+- **Amazon CloudFront** - CDN with CMCD log collection
+- **AWS Lambda** - Log processing functions
+- **Amazon Timestream for InfluxDB** - CMCD metrics storage
+- **Amazon EC2** - Bastion host for secure database access
+- **Amazon Kinesis Data Firehose** - Real-time log streaming
+
+### Prerequisites for Deployment
+
+- AWS CLI configured with appropriate permissions
+- AWS account with sufficient service limits
+- VPC with public and private subnets (or use default VPC)
+
+### Deploy CloudFormation Stack
+
+1. **Clone the Repository**:
+   ```bash
+   git clone <repository-url>
+   cd cmcd-mcp
+   ```
+
+2. **Deploy the Stack**:
+   ```bash
+   aws cloudformation create-stack \
+     --stack-name cmcd-analytics-pipeline \
+     --template-body file://cloudformation/cmcd-pipeline.yaml \
+     --parameters ParameterKey=Environment,ParameterValue=dev \
+     --capabilities CAPABILITY_IAM \
+     --region <REGION>
+   ```
+
+3. **Monitor Deployment**:
+   ```bash
+   aws cloudformation describe-stacks --stack-name cmcd-analytics-pipeline --region <REGION>
+   ```
+
+4. **Get Stack Outputs**:
+   ```bash
+   aws cloudformation describe-stacks \
+     --stack-name cmcd-analytics-pipeline \
+     --query 'Stacks[0].Outputs'
+   ```
+
+### Key CloudFormation Outputs
+
+| Output | Description | Usage |
+|--------|-------------|-------|
+| `InfluxDBEndpoint` | InfluxDB connection URL | MCP server configuration |
+| `InfluxDBToken` | Database authentication token | MCP server configuration |
+| `InfluxDBOrg` | Organization name | MCP server configuration |
+| `S3BucketName` | Video content bucket | Upload HLS files |
+| `CloudFrontDomain` | CDN domain | Video playback URLs |
+| `BastionInstanceId` | EC2 bastion host ID | SSM connection |
+
+## Managing InfluxDB Tokens
+
+### Creating a New InfluxDB Token
+1. **Open a SSM tunnel connection to the InfluxDB**:
+   - Get bastion instance ID from CloudFormation outputs
+   - Get InfluxDB endpoint from CloudFormation outputs
+   - Run the below command by replacing the Instance ID and InfluxDB endpoint from the output
+   
+   ```bash
+   aws ssm start-session --target <BASTION-HOST-INSTANCE-ID> --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters '{"host":["<INFLUX_DB_ENDPOINT>"],"portNumber":["8086"],"localPortNumber":["8086"]}' --region <REGION>
+   ```
+   
+   Sample Command:
+   ```bash
+   aws ssm start-session --target i-06c116da03a889de9 --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters '{"host":["73h2dsg42t-couyzfmko7r2io.timestream-influxdb.us-east-2.on.aws"],"portNumber":["8086"],"localPortNumber":["8086"]}' --region us-east-2
+   ```
+
+   Keep this terminal window open as it maintains the tunnel connection.
+
+2. **Access the InfluxDB UI**:
+   - Make sure that the SSM tunnel is up and accepting connections by running the previous command
+   - Access the InfluxDB UI at https://localhost:8086 from any browser like Chrome
+
+3. **Generate a New Token**:
+   - Log in with your admin credentials which can be retrieved from secrets manager. The secrets starts with InfluxDBSecret-<dbinstance>
+   - Enter the Username as 'admin' and password retrieved from the secrets manager
+   - Navigate to "Load Data" > "API Tokens" in the left sidebar
+   - Click "Generate API Token" > "All Access API Token"
+     - Select the appropriate permissions:
+     - For full access: Select "All Access"
+     - For limited access: Select specific buckets and permissions
+   - Enter a description for your token e.g. "Used for writing and querying"
+   - Click "Save"
+   - Copy the generated token immediately (it will only be shown once)
+   - Save the InfluxDB Token as this will be used later.
+
+4. **Update Lambda Function Environment Variables**:
+   - Navigate to the AWS Lambda Console
+   - Find and select your CMCD processor Lambda function (named `cmcd-analytics-dev-processor`)
+   - Go to the "Configuration" tab
+   - Select "Environment variables"
+   - Find the `INFLUXDB_TOKEN` variable and click "Edit"
+   - Update the value with your new token
+   - Click "Save"
+
+### Upload HLS Content
+
+The CloudFormation template creates an S3 bucket for video content accessible via CloudFront:
+
+1. **Upload HLS Video Files**:
+   ```bash
+   # Upload your HLS playlist and segments to the S3 bucket
+   # Use the S3BucketName from CloudFormation outputs
+   aws s3 cp your-video.m3u8 s3://<S3BucketName from CloudFormation outputs>/videos/
+   aws s3 cp video-segments/ s3://<S3BucketName from CloudFormation outputs>/videos/ --recursive
+   ```
+
+2. **Configure the Player**:
+   - Open `index.html` in the S3 bucket
+   - Update the video source URL with your video path:
+   ```javascript
+   // Replace the source URL in web/index.html
+   src: "https://<CloudFrontDomain from CloudFormation outputs>/videos/your-video.m3u8"
+   ```
+   If your-video.m3u8 is named as master.m3u8, then no change is needed.
+
+3. **Generate CMCD Data**:
+   - Play the video in the browser
+   - The player automatically sends CMCD parameters to CloudFront
+   - Streaming telemetry data will be collected and processed into InfluxDB
+
+## Quick Start
+
+### 1. Install Required Dependencies
+
+```bash
+# Navigate to the CMCD directory
+cd /<DirectoryPath>/cmcd/
+pip install -r mcp/requirements.txt
 ```
-./run_client.sh
+
+### 2. Configure Environment
+
+Update the `mcp/.env` file in the project mcp using values from your CloudFormation stack outputs:
+
+```bash
+INFLUXDB_URL=https://localhost:8086
+INFLUXDB_TOKEN=<InfluxDBToken generated previously from the InfluxDB UI>
+INFLUXDB_ORG=<InfluxDBOrg from secrets manager e.g. cmcd-org>
+VERIFY_SSL=false
 ```
+
+### 3. Verify the MCP Configuration File
+
+The file at `mcp/mcp.json` should have the following content:
+```json
+{
+  "mcpServers": {
+    "cmcd-mcp": {
+      "command": "python3",
+      "args": ["cmcd_server.py"],
+      "cwd": "<DIRECTORY_PATH>",
+      "env": {
+        "FASTMCP_LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}
+```
+
+### 4. Copy the mcp.json File to Q CLI Directory
+
+```bash
+cp mcp/mcp.json ~/.aws/amazonq/mcp.json
+```
+
+OR based on your directory structure:
+
+```bash
+cp mcp.json ~/.q/mcp.json
+```
+
+### 5. Connect via AWS SSM (Bastion Host)
+
+The InfluxDB instance is typically deployed in a private subnet and requires connection through a bastion host.
+If the SSM connection which was started previously has closed, then start the session again:
+
+- Run the below command by replacing the Instance ID and InfluxDB endpoint from the output
+  ```bash
+  aws ssm start-session --target <BASTION-HOST-INSTANCE-ID> --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters '{"host":["<INFLUX_DB_ENDPOINT>"],"portNumber":["8086"],"localPortNumber":["8086"]}' --region <REGION>
+  ```
+  
+  Sample Command:
+  ```bash
+  aws ssm start-session --target i-06c116da03a889de9 --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters '{"host":["73h2dsg42t-couyzfmko7r2io.timestream-influxdb.us-east-2.on.aws"],"portNumber":["8086"],"localPortNumber":["8086"]}' --region us-east-2
+  ```
+
+  Keep this terminal window open as it maintains the tunnel connection.
+
+## Data Schema
+
+The server expects CMCD data in InfluxDB with the following structure:
+
+| Component | Value | Description |
+|-----------|-------|-------------|
+| **Bucket** | `cmcd-metrics` | InfluxDB bucket containing CMCD data |
+| **Measurement** | `cloudfront_logs` | Primary measurement name |
+
+### CMCD Fields
+
+| Field | Description | Unit |
+|-------|-------------|------|
+| `cmcd_bl` | Buffer length | milliseconds |
+| `cmcd_br` | Encoded bitrate | kbps |
+| `cmcd_d` | Segment duration | milliseconds |
+| `cmcd_su` | Startup flag | boolean |
+| `cmcd_tb` | Top bitrate | kbps |
+| `cmcd_bs` | Buffer starved flag | boolean |
+| `cmcd_mtp` | Measured throughput | kbps |
+
+### Tags
+
+| Tag | Description |
+|-----|-------------|
+| `cmcd_sid` | Session identifier |
+| `cmcd_cid` | Content identifier |
+| `edge_location` | CDN edge location |
 
 ## Available Tools
 
-The MCP server provides the following tools:
+### `get_average_bitrate`
+Calculates average bitrate over specified time ranges with optional filtering.
 
-1. **get_average_bitrate**: Get average bitrate statistics
-2. **get_session_details**: Retrieve detailed session information
-3. **analyze_buffer_events**: Analyze buffer-related events
-4. **identify_playback_errors**: Identify potential playback errors
-5. **get_edge_location_stats**: Analyze metrics by edge location
+**Parameters:**
+- `time_range` (default: "-24h"): Time range for analysis
+- `cmcd_sid` (optional): Filter by session ID
+- `cmcd_cid` (optional): Filter by content ID
 
-## Configuration
+### `get_session_details`
+Retrieves comprehensive metrics timeline for a specific session.
 
-### Environment Variables
+**Parameters:**
+- `cmcd_sid` (required): Session ID to analyze
+- `time_range` (default: "-24h"): Time range for analysis
 
-The following environment variables can be configured in the `mcp/.env` file:
+### `analyze_buffer_events`
+Identifies potential rebuffering events based on buffer level thresholds.
+
+**Parameters:**
+- `time_range` (default: "-24h"): Time range for analysis
+- `cmcd_sid` (optional): Filter by session ID
+- `threshold_ms` (default: 500): Buffer level threshold in milliseconds
+
+### `identify_playback_errors`
+Detects various playback issues including buffer underruns and startup delays.
+
+**Parameters:**
+- `time_range` (default: "-24h"): Time range for analysis
+- `cmcd_sid` (optional): Filter by session ID
+
+### `list_session_and_content_ids`
+Enumerates unique session and content identifiers in the dataset.
+
+**Parameters:**
+- `time_range` (default: "-24h"): Time range for analysis
+- `limit` (default: 100): Maximum number of IDs to return
+
+## Integration with Amazon Q CLI
+
+To use this MCP server with Amazon Q CLI, you need to configure the MCP client settings:
+
+### Option 1: Copy to Q CLI Directory
+
+```bash
+# Copy the MCP configuration to Q CLI directory
+cp mcp.json ~/.q/mcp.json
+```
+
+### Option 2: Create .amazonq Directory
+
+```bash
+# Create .amazonq directory in your project root
+mkdir .amazonq
+cp mcp.json .amazonq/mcp.json
+```
+
+### MCP Configuration (mcp.json)
+
+```json
+{
+  "mcpServers": {
+    "cmcd-analytics": {
+      "command": "./cmcd-mcp-env/bin/python",
+      "args": ["mcp/cmcd_server.py"],
+      "env": {
+        "INFLUXDB_URL": "your-influxdb-url",
+        "INFLUXDB_TOKEN": "your-token",
+        "INFLUXDB_ORG": "your-org"
+      }
+    }
+  }
+}
+```
+
+Make sure that the files in the mcp directory have execute permissions:
+
+```bash
+chmod +x mcp/*
+```
+
+### Running Amazon Q CLI
+
+Ensure Amazon Q CLI also runs in the virtual environment:
+
+```bash
+# Run Q CLI
+q chat
+```
+
+Once configured, Amazon Q can analyze your CMCD streaming data and provide insights about:
+
+- Streaming performance trends
+- Quality issues and their root causes
+- User experience metrics
+- Session and content correlations
+
+## Usage Examples
+
+### Example 1: Query Bitrate Information
+```
+Q: What is the bitrate in last 1 hour?
+```
+
+### Example 2: Request Performance Insights
+```
+Q: Provide insights on the streaming performance
+```
+
+### Example Output:
 
 ```
-# InfluxDB Configuration
-INFLUXDB_URL=http://localhost:8086
-INFLUXDB_TOKEN=your_influxdb_token
-INFLUXDB_ORG=cmcd-org
-VERIFY_SSL=False
-INFLUXDB_TIMEOUT=5000
+Based on the data I've gathered, here are the key insights on streaming performance:
 
-# AWS SSM Tunnel Configuration
-AWS_REGION=REGION (e.g. us-east-2)
-BASTION_INSTANCE_ID=INSTANCE_ID (e.g. i-0e27bf506b4743490)
-INFLUXDB_ENDPOINT=your-influxdb-endpoint.timestream-influxdb.region.on.aws
-LOCAL_PORT=8086
-REMOTE_PORT=8086
+## Streaming Performance Summary
+
+### Bitrate Analysis
+- Average Bitrate: 3,566 kbps (3.57 Mbps)
+- This indicates a relatively high-quality stream, suitable for HD content
+
+### Buffer Events
+- Total Buffer Events: 947 events recorded in the last 24 hours
+- Low Buffer Events: 0 (below the 500ms threshold)
+- This suggests that while there are many buffer-related events, none have reached critically low levels
+
+### Playback Errors
+- Total Errors: 53 detected in the last 24 hours
+- Error Type: All errors are "sudden_buffer_drop" events
+- Severity: All errors are classified as "medium" severity
+
+### Buffer Drop Analysis
+- Most significant drops:
+  - 101,400ms → 10,400ms (91% drop)
+  - 101,200ms → 31,100ms (69% drop)
+  - 100,800ms → 36,700ms (64% drop)
+- These sudden buffer drops could cause momentary quality degradation or brief pauses
+
+### Content and Session Information
+- Active Sessions: 1 unique session ID (session_md91ykdl5yrcwq371f5)
+- Content: 1 unique content ID (video-content-demo)
+
+## Performance Insights
+
+1. Overall Quality: The average bitrate of 3.57 Mbps indicates good streaming quality, likely delivering HD content to viewers.
+
+2. Buffer Health: While there are numerous buffer events, the system is maintaining adequate buffer levels above the critical threshold of 500ms, preventing playback interruptions.
+
+3. Playback Stability Issues: The 53 sudden buffer drop events suggest network fluctuations or adaptive bitrate switching. These drops could cause momentary quality degradation but aren't causing complete playback failures.
+
+4. Pattern Analysis: Buffer drops are clustered around specific time periods (notably around 16:47-16:58 and 18:09-18:33), suggesting potential network congestion during these times.
+
+5. Buffer Management: The system appears to maintain large buffers (often 60,000-100,000ms) before drops occur, which helps prevent actual rebuffering events despite the drops.
+
+## Recommendations
+
+1. Optimize ABR Logic: Review the adaptive bitrate switching logic to make smoother transitions that don't cause such dramatic buffer drops.
+
+2. Network Analysis: Investigate network conditions during the time periods with clustered buffer drops to identify potential bottlenecks.
+
+3. Buffer Strategy: Consider adjusting the buffer strategy to maintain more consistent buffer levels rather than allowing very large buffers that then experience dramatic drops.
+
+4. Session Monitoring: Set up alerts for when buffer drops exceed 70% to proactively address potential streaming issues.
+
+5. Content Delivery Optimization: Analyze edge location performance to ensure optimal content delivery across all regions.
+
+The streaming service is performing adequately with good bitrates, but the buffer stability could be improved to provide a more consistent viewing experience.
 ```
 
 ## Troubleshooting
 
-### Connection Issues
+### Common Issues
 
-If you're experiencing connection issues with InfluxDB:
+1. **Connection Errors**: 
+   - Verify InfluxDB URL and credentials
+   - Ensure SSM port forwarding is active
+   - Check bastion host security groups allow port 8086
 
-1. Ensure the SSM tunnel is running
-2. Check if port 8086 is open and accessible
-3. Verify your InfluxDB token is correct
-4. Try using HTTP instead of HTTPS for the InfluxDB URL
-5. Reduce the timeout value if connections are slow
+2. **No Data Returned**: 
+   - Check bucket name and measurement structure
+   - Verify CMCD data is being generated by video player
+   - Confirm CloudFront logs are being processed into InfluxDB
 
-### Alternative Test Scripts
+3. **Schema Errors**: 
+   - Ensure CMCD fields match expected format
+   - Verify tag names use `cmcd_sid` and `cmcd_cid`
 
-The repository includes several test scripts to help diagnose connection issues:
+4. **SSM Connection Issues**:
+   ```bash
+   # Check SSM agent status using bastion instance ID from CloudFormation
+   aws ssm describe-instance-information --filters "Key=InstanceIds,Values=<BastionInstanceId>"
+   
+   # Verify IAM permissions for SSM
+   aws sts get-caller-identity
+   ```
 
-- `check_influxdb.py`: Tests the InfluxDB connection with current configuration
-- `test_influxdb_connection.py`: Simple connection test with timing information
-## Project Structure
+### Logging
 
-```
-.
-├── check_influxdb.py              # InfluxDB connection tester
-├── cmcd-analytics-stack-fixed.yaml # CloudFormation template
-├── mcp/
-│   ├── .env                       # Environment variables
-│   ├── cmcd_client.py             # MCP client implementation
-│   ├── cmcd_server.py             # MCP server implementation
-│   ├── mcp.json                   # MCP configuration
-│   └── requirements.txt           # Python dependencies
-├── run_client.sh                  # Script to run the MCP client
-├── run_local_mcp.sh               # Script to run the MCP server locally
-├── run_mcp_server.sh              # Script to run the MCP server with tunnel
-├── setup_tunnel.sh                # Script to set up SSM tunnel
-└── README.md                      # This file
-```
+Logs are written to `cmcd_server.log` with rotation at 10MB. Check logs for detailed error information.
 
-## References
+## Contributing
 
-- [CMCD Specification (CTA-5004)](https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf)
-- [AWS Timestream for InfluxDB](https://aws.amazon.com/timestream/influxdb/)
-- [Model Context Protocol (MCP)](https://github.com/model-context-protocol/mcp)
+Contributions are welcome! Please ensure:
+
+1. Code follows existing patterns
+2. New tools include proper documentation
+3. Error handling is comprehensive
+4. Tests cover new functionality
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the LICENSE file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## Related Projects
+
+- [CloudFront CMCD Real-time Dashboard](https://github.com/aws-samples/cloudfront-cmcd-realtime-dashboard)
+- [CMCD Specification (CTA-5004)](https://www.cta.tech/Resources/Standards)
+- [Model Context Protocol](https://modelcontextprotocol.io/)
+
+---
+
+**Note**: This server focuses on analytics and does not include direct InfluxDB query capabilities. For custom Flux queries, consider the companion InfluxDB MCP server.
