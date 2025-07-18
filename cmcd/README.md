@@ -173,7 +173,9 @@ The CloudFormation template creates an S3 bucket for video content accessible vi
    - The player automatically sends CMCD parameters to CloudFront
    - Streaming telemetry data will be collected and processed into InfluxDB
 
-## Quick Start
+## Integration with Amazon Q CLI
+
+To use this MCP server with Amazon Q CLI, you need to configure the MCP settings:
 
 ### 1. Install Required Dependencies
 
@@ -211,19 +213,40 @@ The file at `mcp/mcp.json` should have the following content:
   }
 }
 ```
+Example mcp.json
 
+```json
+
+{
+  "mcpServers": {
+    "cmcd-mcp": {
+      "command": "python3",
+      "args": ["cmcd_server.py"],
+      "cwd": "/Users/johndoe/Downloads/cmcd/mcp",
+      "env": {
+        "FASTMCP_LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}
+```
 ### 4. Copy the mcp.json File to Q CLI Directory
 
 ```bash
 cp mcp/mcp.json ~/.aws/amazonq/mcp.json
 ```
 
-OR based on your directory structure:
+### OR based on your directory structure:
 
 ```bash
 cp mcp.json ~/.q/mcp.json
 ```
 
+### Make sure that the files in the mcp directory have execute permissions:
+
+```bash
+chmod +x mcp/*
+```
 ### 5. Connect via AWS SSM (Bastion Host)
 
 The InfluxDB instance is typically deployed in a private subnet and requires connection through a bastion host.
@@ -241,51 +264,10 @@ If the SSM connection which was started previously has closed, then start the se
 
   Keep this terminal window open as it maintains the tunnel connection.
 
-## Integration with Amazon Q CLI
-
-To use this MCP server with Amazon Q CLI, you need to configure the MCP client settings:
-
-### Option 1: Copy to Q CLI Directory
-
-```bash
-# Copy the MCP configuration to Q CLI directory
-cp mcp.json ~/.q/mcp.json
-```
-
-### Option 2: Create .amazonq Directory
-
-```bash
-# Create .amazonq directory in your project root
-mkdir .amazonq
-cp mcp.json .amazonq/mcp.json
-```
-
-### MCP Configuration (mcp.json)
-
-```json
-{
-  "mcpServers": {
-    "cmcd-mcp": {
-      "command": "python3",
-      "args": ["cmcd_server.py"],
-      "cwd": "<DIRECTORY_PATH>/mcp",
-      "env": {
-        "FASTMCP_LOG_LEVEL": "INFO"
-      }
-    }
-  }
-}
-```
-
-Make sure that the files in the mcp directory have execute permissions:
-
-```bash
-chmod +x mcp/*
-```
 
 ### Running Amazon Q CLI
 
-Ensure Amazon Q CLI also runs in the virtual environment:
+Enter into chat mode with the CLI:
 
 ```bash
 # Run Q CLI
@@ -447,6 +429,7 @@ Enumerates unique session and content identifiers in the dataset.
    - Verify InfluxDB URL and credentials
    - Ensure SSM port forwarding is active
    - Check bastion host security groups allow port 8086
+   - Ensure the URL in mcp/.env file has https and not http
 
 2. **No Data Returned**: 
    - Check bucket name and measurement structure
