@@ -73,7 +73,7 @@ VERIFY_SSL=False
 ## Data Schema
 
 ### Database Structure
-- **Database**: `cmcd-metrics` (or `cmcd_metrics`)
+- **Database**: `cmcd-metrics` 
 - **Measurement**: `cloudfront_logs`
 - **Time Series**: Data points with timestamps and CMCD field values
 

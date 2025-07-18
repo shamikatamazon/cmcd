@@ -59,6 +59,7 @@ mcp = FastMCP(
     3. Analyze buffer-related events with the analyze_buffer_events tool
     4. Identify potential playback errors with the identify_playback_errors tool
     5. Analyze metrics by edge location with the get_edge_location_stats tool
+    6. List unique session IDs and content IDs with the list_session_and_content_ids tool
     
     The server analyzes streaming performance data including buffer levels (bl), bitrates (br), duration (d),
     media type (mtp), startup (su), and target buffer (tb) to generate insights about streaming quality of experience (QoE).
@@ -209,76 +210,35 @@ async def get_cmcd_data(query: str, url: str = INFLUXDB_URL, token: str = INFLUX
 
     except Exception as e:
         logger.error(f'Error querying InfluxDB: {str(e)}')
+        logger.error(f'Query that failed: {query}')
         return {'status': 'error', 'message': str(e)}
 
 @mcp.tool(name='get_average_bitrate', description='Get average bitrate from CMCD metrics')
 async def get_average_bitrate(
     time_range: str = Field(default="-24h", description="Time range for the query (e.g., -1h, -24h, -7d)"),
-    session_id: str = Field(default=None, description="Optional session ID to filter by"),
-    content_id: str = Field(default=None, description="Optional content ID to filter by")
+    cmcd_sid: str = Field(default=None, description="Optional session ID to filter by"),
+    cmcd_cid: str = Field(default=None, description="Optional content ID to filter by")
 ) -> Dict[str, Any]:
     """Get the average bitrate from CMCD metrics over the specified time range.
     
     Returns:
         Average bitrate in kbps and related statistics.
     """
-    logger.info(f"Getting average bitrate for time_range={time_range}, session_id={session_id}, content_id={content_id}")
+    logger.info(f"Getting average bitrate for time_range={time_range}, cmcd_sid={cmcd_sid}, cmcd_cid={cmcd_cid}")
     
-    # Try a simpler query first to check if data exists
-    check_query = f'''
+    # Build the query
+    query = f'''
     from(bucket: "cmcd-metrics")
       |> range(start: {time_range})
       |> filter(fn: (r) => r["_measurement"] == "cloudfront_logs")
       |> filter(fn: (r) => r["_field"] == "cmcd_br")
-      |> limit(n: 1)
     '''
     
-    check_result = await get_cmcd_data(check_query)
-    logger.debug(f"Check query result: {check_result}")
+    if cmcd_sid:
+        query += f'  |> filter(fn: (r) => r["cmcd_sid"] == "{cmcd_sid}")\n'
     
-    if check_result['status'] != 'success' or not check_result['result']:
-        logger.warning("No bitrate data found in initial check")
-        # Try with a different bucket name
-        check_query = f'''
-        from(bucket: "cmcd_metrics")
-          |> range(start: {time_range})
-          |> filter(fn: (r) => r["_measurement"] == "cloudfront_logs")
-          |> filter(fn: (r) => r["_field"] == "cmcd_br")
-          |> limit(n: 1)
-        '''
-        check_result = await get_cmcd_data(check_query)
-        logger.debug(f"Second check query result: {check_result}")
-        
-        if check_result['status'] != 'success' or not check_result['result']:
-            logger.warning("No bitrate data found in second check either")
-            # List available buckets
-            buckets_query = '''
-            buckets()
-            '''
-            buckets_result = await get_cmcd_data(buckets_query)
-            logger.info(f"Available buckets: {buckets_result}")
-            return {'status': 'error', 'message': 'No bitrate data found. Please check database configuration.'}
-    
-    # Determine which bucket name to use
-    bucket_name = "cmcd-metrics"
-    if check_result['status'] == 'success' and check_result['result']:
-        # Use the bucket that worked in the check query
-        if "cmcd_metrics" in check_query:
-            bucket_name = "cmcd_metrics"
-    
-    # Now build the actual query
-    query = f'''
-    from(bucket: "{bucket_name}")
-      |> range(start: {time_range})
-      |> filter(fn: (r) => r["_measurement"] == "cloudfront_logs")
-      |> filter(fn: (r) => r["_field"] == "cmcd_br")
-    '''
-    
-    if session_id:
-        query += f'  |> filter(fn: (r) => r["session_id"] == "{session_id}")\n'
-    
-    if content_id:
-        query += f'  |> filter(fn: (r) => r["content_id"] == "{content_id}")\n'
+    if cmcd_cid:
+        query += f'  |> filter(fn: (r) => r["cmcd_cid"] == "{cmcd_cid}")\n'
     
     query += '''
       |> group()
@@ -314,9 +274,8 @@ async def get_average_bitrate(
                 'status': 'success',
                 'average_bitrate_kbps': avg_bitrate,
                 'time_range': time_range,
-                'session_id': session_id,
-                'content_id': content_id,
-                'bucket_used': bucket_name,
+                'cmcd_sid': cmcd_sid,
+                'cmcd_cid': cmcd_cid,
                 'raw_result': result['result'][0]['raw_values'] if 'raw_values' in result['result'][0] else {}
             }
         except Exception as e:
@@ -329,16 +288,16 @@ async def get_average_bitrate(
             }
     else:
         logger.error("Failed to calculate average bitrate")
+        logger.error("query is " + query)
         return {
             'status': 'error', 
             'message': 'No bitrate data found for the specified criteria',
-            'query_used': query,
-            'bucket_tried': bucket_name
+            'query_used': query
         }
 
 @mcp.tool(name='get_session_details', description='Get detailed information about a streaming session')
 async def get_session_details(
-    session_id: str = Field(..., description="Session ID to analyze"),
+    cmcd_sid: str = Field(..., description="Session ID to analyze"),
     time_range: str = Field(default="-24h", description="Time range for the query (e.g., -1h, -24h, -7d)")
 ) -> Dict[str, Any]:
     """Get detailed information about a specific streaming session including bitrate changes,
@@ -351,7 +310,7 @@ async def get_session_details(
     from(bucket: "cmcd-metrics")
       |> range(start: {time_range})
       |> filter(fn: (r) => r["_measurement"] == "cloudfront_logs")
-      |> filter(fn: (r) => r["session_id"] == "{session_id}")
+      |> filter(fn: (r) => r["cmcd_sid"] == "{cmcd_sid}")
       |> sort(columns: ["_time"])
     '''
     
@@ -360,7 +319,7 @@ async def get_session_details(
     if result['status'] == 'success' and result['result']:
         # Process and organize session data
         session_data = {
-            'session_id': session_id,
+            'cmcd_sid': cmcd_sid,
             'start_time': result['result'][0]['time'],
             'end_time': result['result'][-1]['time'],
             'metrics': {}
@@ -379,12 +338,12 @@ async def get_session_details(
         
         return {'status': 'success', 'session_data': session_data}
     else:
-        return {'status': 'error', 'message': f'No data found for session ID: {session_id}'}
+        return {'status': 'error', 'message': f'No data found for session ID: {cmcd_sid}'}
 
 @mcp.tool(name='analyze_buffer_events', description='Analyze buffer-related events from CMCD metrics')
 async def analyze_buffer_events(
     time_range: str = Field(default="-24h", description="Time range for the query (e.g., -1h, -24h, -7d)"),
-    session_id: str = Field(default=None, description="Optional session ID to filter by"),
+    cmcd_sid: str = Field(default=None, description="Optional session ID to filter by"),
     threshold_ms: int = Field(default=500, description="Buffer level threshold in milliseconds")
 ) -> Dict[str, Any]:
     """Analyze buffer-related events from CMCD metrics, identifying potential rebuffering events
@@ -400,8 +359,8 @@ async def analyze_buffer_events(
       |> filter(fn: (r) => r["_field"] == "cmcd_bl")
     '''
     
-    if session_id:
-        query += f'  |> filter(fn: (r) => r["session_id"] == "{session_id}")\n'
+    if cmcd_sid:
+        query += f'  |> filter(fn: (r) => r["cmcd_sid"] == "{cmcd_sid}")\n'
     
     query += '''
       |> sort(columns: ["_time"])
@@ -419,7 +378,7 @@ async def analyze_buffer_events(
             event = {
                 'time': record['time'],
                 'buffer_level_ms': buffer_level,
-                'session_id': record['tags'].get('session_id', 'unknown')
+                'cmcd_sid': record['tags'].get('cmcd_sid', 'unknown')
             }
             buffer_events.append(event)
             
@@ -440,7 +399,7 @@ async def analyze_buffer_events(
 @mcp.tool(name='identify_playback_errors', description='Identify potential playback errors from CMCD metrics')
 async def identify_playback_errors(
     time_range: str = Field(default="-24h", description="Time range for the query (e.g., -1h, -24h, -7d)"),
-    session_id: str = Field(default=None, description="Optional session ID to filter by")
+    cmcd_sid: str = Field(default=None, description="Optional session ID to filter by")
 ) -> Dict[str, Any]:
     """Identify potential playback errors by analyzing patterns in CMCD metrics such as
     sudden bitrate drops, buffer underruns, or unusual startup delays.
@@ -456,8 +415,8 @@ async def identify_playback_errors(
       |> filter(fn: (r) => r["_field"] == "cmcd_bl")
     '''
     
-    if session_id:
-        buffer_query += f'  |> filter(fn: (r) => r["session_id"] == "{session_id}")\n'
+    if cmcd_sid:
+        buffer_query += f'  |> filter(fn: (r) => r["cmcd_sid"] == "{cmcd_sid}")\n'
     
     buffer_query += '  |> sort(columns: ["_time"])\n'
     
@@ -469,8 +428,8 @@ async def identify_playback_errors(
       |> filter(fn: (r) => r["_field"] == "cmcd_su")
     '''
     
-    if session_id:
-        startup_query += f'  |> filter(fn: (r) => r["session_id"] == "{session_id}")\n'
+    if cmcd_sid:
+        startup_query += f'  |> filter(fn: (r) => r["cmcd_sid"] == "{cmcd_sid}")\n'
     
     startup_query += '  |> sort(columns: ["_time"])\n'
     
@@ -492,7 +451,7 @@ async def identify_playback_errors(
                     'type': 'buffer_underrun',
                     'time': record['time'],
                     'buffer_level_ms': current_buffer,
-                    'session_id': record['tags'].get('session_id', 'unknown'),
+                    'cmcd_sid': record['tags'].get('cmcd_sid', 'unknown'),
                     'severity': 'high' if current_buffer == 0 else 'medium'
                 })
             
@@ -503,7 +462,7 @@ async def identify_playback_errors(
                     'time': record['time'],
                     'previous_buffer_ms': prev_buffer,
                     'current_buffer_ms': current_buffer,
-                    'session_id': record['tags'].get('session_id', 'unknown'),
+                    'cmcd_sid': record['tags'].get('cmcd_sid', 'unknown'),
                     'severity': 'medium'
                 })
             
@@ -520,7 +479,7 @@ async def identify_playback_errors(
                     'type': 'excessive_startup_delay',
                     'time': record['time'],
                     'startup_delay_ms': startup_delay,
-                    'session_id': record['tags'].get('session_id', 'unknown'),
+                    'cmcd_sid': record['tags'].get('cmcd_sid', 'unknown'),
                     'severity': 'high' if startup_delay > 5000 else 'medium'
                 })
     
@@ -529,7 +488,72 @@ async def identify_playback_errors(
         'total_errors': len(errors),
         'errors': errors,
         'time_range': time_range,
-        'session_id': session_id
+        'cmcd_sid': cmcd_sid
+    }
+
+@mcp.tool(name='list_session_and_content_ids', description='List unique session IDs and content IDs from CMCD data')
+async def list_session_and_content_ids(
+    time_range: str = Field(default="-24h", description="Time range for the query (e.g., -1h, -24h, -7d)"),
+    limit: int = Field(default=100, description="Maximum number of IDs to return")
+) -> Dict[str, Any]:
+    """List unique session IDs and content IDs from CMCD data within the specified time range.
+    
+    Returns:
+        Lists of unique session IDs and content IDs found in the data.
+    """
+    # Query for unique session IDs
+    session_query = f'''
+    from(bucket: "cmcd-metrics")
+      |> range(start: {time_range})
+      |> filter(fn: (r) => r["_measurement"] == "cloudfront_logs")
+      |> filter(fn: (r) => exists r["cmcd_sid"])
+      |> keep(columns: ["cmcd_sid"])
+      |> distinct(column: "cmcd_sid")
+      |> limit(n: {limit})
+    '''
+    
+    # Query for unique content IDs
+    content_query = f'''
+    from(bucket: "cmcd-metrics")
+      |> range(start: {time_range})
+      |> filter(fn: (r) => r["_measurement"] == "cloudfront_logs")
+      |> filter(fn: (r) => exists r["cmcd_cid"])
+      |> keep(columns: ["cmcd_cid"])
+      |> distinct(column: "cmcd_cid")
+      |> limit(n: {limit})
+    '''
+    
+    # Execute queries
+    session_result = await get_cmcd_data(session_query)
+    content_result = await get_cmcd_data(content_query)
+    
+    cmcd_sids = []
+    cmcd_cids = []
+    
+    # Extract session IDs
+    if session_result['status'] == 'success' and session_result['result']:
+        for record in session_result['result']:
+            if 'raw_values' in record and 'cmcd_sid' in record['raw_values']:
+                cmcd_sid = record['raw_values']['cmcd_sid']
+                if cmcd_sid and cmcd_sid not in cmcd_sids:
+                    cmcd_sids.append(cmcd_sid)
+    
+    # Extract content IDs
+    if content_result['status'] == 'success' and content_result['result']:
+        for record in content_result['result']:
+            if 'raw_values' in record and 'cmcd_cid' in record['raw_values']:
+                cmcd_cid = record['raw_values']['cmcd_cid']
+                if cmcd_cid and cmcd_cid not in cmcd_cids:
+                    cmcd_cids.append(cmcd_cid)
+    
+    return {
+        'status': 'success',
+        'cmcd_sids': cmcd_sids,
+        'cmcd_cids': cmcd_cids,
+        'session_count': len(cmcd_sids),
+        'content_count': len(cmcd_cids),
+        'time_range': time_range,
+        'limit': limit
     }
 
 
