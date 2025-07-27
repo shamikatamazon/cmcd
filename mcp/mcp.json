@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "cmcd-mcp": {
+      "command": "python3",
+      "args": ["cmcd_server.py"],
+      "cwd": "/Users/himsarda/Downloads/cmcd-main-2/mcp",
+      "env": {
+        "FASTMCP_LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}
