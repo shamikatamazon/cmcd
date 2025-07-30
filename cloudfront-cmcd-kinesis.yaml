@@ -28,11 +28,38 @@ Parameters:
     Default: cmcd-content-bucket
 
 Resources:
+  # KMS Key for S3 encryption
+  S3KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for S3 bucket encryption
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+  S3KMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}-s3'
+      TargetKeyId: !Ref S3KMSKey
+
   # S3 Bucket for content
   ContentBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub '${S3BucketName}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref S3KMSKey
+            BucketKeyEnabled: true
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -51,6 +78,27 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
+  # KMS Key for Kinesis encryption
+  KinesisKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for Kinesis stream encryption
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+  KinesisKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}-kinesis'
+      TargetKeyId: !Ref KinesisKMSKey
+
   # Kinesis Data Stream
   CMCDKinesisStream:
     Type: AWS::Kinesis::Stream
@@ -58,6 +106,30 @@ Resources:
       Name: !Ref KinesisStreamName
       ShardCount: 1
       RetentionPeriodHours: 24
+      StreamEncryption:
+        EncryptionType: KMS
+        KeyId: !Ref KinesisKMSKey
+
+  # Managed Policy for CloudFront Kinesis access
+  CloudFrontKinesisPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - kinesis:PutRecord
+              - kinesis:PutRecords
+            Resource: !GetAtt CMCDKinesisStream.Arn
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !GetAtt KinesisKMSKey.Arn
 
   # IAM Role for CloudFront Real-time Logs
   CloudFrontLogsRole:
@@ -70,16 +142,8 @@ Resources:
             Principal:
               Service: cloudfront.amazonaws.com
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: KinesisWritePolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - kinesis:PutRecord
-                  - kinesis:PutRecords
-                Resource: !GetAtt CMCDKinesisStream.Arn
+      ManagedPolicyArns:
+        - !Ref CloudFrontKinesisPolicy
 
   # CloudFront Real-time Log Configuration
   CMCDRealtimeLogConfig:
@@ -131,6 +195,9 @@ Resources:
           OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf  # CORS-S3Origin
           ResponseHeadersPolicyId: 5cc3b908-e619-4b99-88e5-2cf7f45965bd  # CORS-With-Preflight
           RealtimeLogConfigArn: !GetAtt CMCDRealtimeLogConfig.Arn
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+          MinimumProtocolVersion: TLSv1.2_2021
         PriceClass: PriceClass_100
 
   # Timestream for InfluxDB
@@ -299,11 +366,69 @@ Resources:
       ToPort: 8086
       SourceSecurityGroupId: !Ref BastionSecurityGroup
 
+  # KMS Key for Secrets Manager encryption
+  SecretsManagerKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for Secrets Manager encryption
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+  SecretsManagerKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}-secrets-manager'
+      TargetKeyId: !Ref SecretsManagerKMSKey
+
+  # Lambda function for secret rotation
+  SecretRotationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-secret-rotation'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Code:
+        ZipFile: |
+          import json
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Secret rotation placeholder')}
+      Role: !GetAtt SecretRotationLambdaRole.Arn
+
+  # IAM Role for Secret Rotation Lambda
+  SecretRotationLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  # Lambda permission for Secrets Manager
+  SecretRotationLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SecretRotationLambda
+      Action: lambda:InvokeFunction
+      Principal: secretsmanager.amazonaws.com
+
   # Secret for InfluxDB password
   InfluxDBSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
       Description: InfluxDB admin password
+      KmsKeyId: !Ref SecretsManagerKMSKey
       GenerateSecretString:
         SecretStringTemplate: '{"username": "admin"}'
         GenerateStringKey: password
@@ -311,6 +436,39 @@ Resources:
         RequireEachIncludedType: true
         IncludeSpace: false
         ExcludeCharacters: '"@/\`'
+
+  # Secret rotation schedule
+  SecretRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    Properties:
+      SecretId: !Ref InfluxDBSecret
+      RotationLambdaARN: !GetAtt SecretRotationLambda.Arn
+      RotationRules:
+        AutomaticallyAfterDays: 30
+
+  # Managed Policy for Bastion Host InfluxDB access
+  BastionInfluxDBPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Ref InfluxDBSecret
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: !GetAtt SecretsManagerKMSKey.Arn
+
+  # DLQ for Lambda functions
+  LambdaDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${AWS::StackName}-lambda-dlq'
+      KmsMasterKeyId: alias/aws/sqs
+      MessageRetentionPeriod: 1209600  # 14 days
 
   # IAM Role for Bastion Host
   BastionRole:
@@ -325,15 +483,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-      Policies:
-        - PolicyName: InfluxDBAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource: !Ref InfluxDBSecret
+        - !Ref BastionInfluxDBPolicy
 
   # Instance Profile for Bastion Host
   BastionInstanceProfile:
@@ -419,6 +569,11 @@ Resources:
                   - ec2:DescribeNetworkInterfaces
                   - ec2:DeleteNetworkInterface
                 Resource: '*'
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !GetAtt KinesisKMSKey.Arn
 
   # Lambda Function
   CMCDProcessorLambda:
