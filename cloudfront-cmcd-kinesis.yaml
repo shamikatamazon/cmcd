@@ -59,6 +59,15 @@ Resources:
               AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
             Action: 'kms:*'
             Resource: '*'
+          - Sid: Allow CloudFront Service
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:GenerateDataKey
+            Resource: '*'
 
   S3KMSKeyAlias:
     Type: AWS::KMS::Alias
@@ -86,6 +95,7 @@ Resources:
   # S3 Bucket Policy for CloudFront and Account Access
   ContentBucketPolicy:
     Type: AWS::S3::BucketPolicy
+    Version: '2012-10-17'
     Properties:
       Bucket: !Ref ContentBucket
       PolicyDocument:
@@ -103,10 +113,7 @@ Resources:
                         !Ref ContentBucket
             Condition:
               StringEquals:
-                'AWS:SourceArn': !Sub 
-                  - 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistributionId}'
-                  - DistributionId:
-                      !Sub '${AWS::StackName}-CloudFrontDistributionId'
+                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CMCDCloudFrontDistribution}'
 
   
 
