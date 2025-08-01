@@ -73,8 +73,8 @@ The complete CMCD analytics pipeline is deployed using AWS CloudFormation, which
    ```bash
    aws cloudformation create-stack \
      --stack-name cmcd-analytics-pipeline \
-     --template-body file://cloudformation/cmcd-pipeline.yaml \
-     --parameters ParameterKey=Environment,ParameterValue=dev \
+     --template-body file://cloudfront-cmcd-kinesis.yaml \
+     --parameters ParameterKey=InfluxDBPassword,ParameterValue=YourSecurePassword123 \
      --capabilities CAPABILITY_IAM
    ```
 
@@ -144,6 +144,23 @@ aws ssm start-session --target <BastionInstanceId from CloudFormation outputs>
 aws ssm start-session --target <BastionInstanceId from CloudFormation outputs> \
   --document-name AWS-StartPortForwardingSession \
   --parameters '{"portNumber":["8086"],"localPortNumber":["8086"]}'
+```
+
+#### Retrieve InfluxDB Password
+
+The InfluxDB password is stored in AWS Secrets Manager. Retrieve it using:
+
+```bash
+# Get the secret ARN from CloudFormation outputs
+SECRET_ARN=$(aws cloudformation describe-stacks \
+  --stack-name cmcd-analytics-pipeline \
+  --query 'Stacks[0].Outputs[?OutputKey==`InfluxDBPasswordSecretArn`].OutputValue' \
+  --output text)
+
+# Retrieve the password
+aws secretsmanager get-secret-value \
+  --secret-id $SECRET_ARN \
+  --query SecretString --output text | jq -r .password
 ```
 
 #### Test Database Connection

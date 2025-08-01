@@ -27,12 +27,29 @@ Parameters:
     Description: Name for the S3 bucket (must be globally unique)
     Default: cmcd-content-bucket
 
+  InfluxDBPassword:
+    Type: String
+    Description: InfluxDB admin password (8-64 alphanumeric characters)
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 64
+    AllowedPattern: '^[a-zA-Z0-9]+$'
+    ConstraintDescription: Must be 8-64 alphanumeric characters
+
+  InfluxDBToken:
+    Type: String
+    Description: InfluxDB API token for Lambda access
+    NoEcho: true
+    MinLength: 10
+    ConstraintDescription: Must be a valid InfluxDB token
+
 Resources:
   # KMS Key for S3 encryption
   S3KMSKey:
     Type: AWS::KMS::Key
     Properties:
       Description: KMS key for S3 bucket encryption
+      EnableKeyRotation: true
       KeyPolicy:
         Version: '2012-10-17'
         Statement:
@@ -66,7 +83,37 @@ Resources:
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
 
-
+  # S3 Bucket Policy for CloudFront and Account Access
+  ContentBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ContentBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipalReadWrite
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+            Resource: !Sub '${ContentBucket}/*'
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CMCDCloudFrontDistribution}'
+          - Sid: AllowAccountUsersAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:ListBucket
+            Resource:
+              - !Sub '${ContentBucket}/*'
+              - !GetAtt ContentBucket.Arn
 
   # Origin Access Control for CloudFront
   OriginAccessControl:
@@ -83,6 +130,7 @@ Resources:
     Type: AWS::KMS::Key
     Properties:
       Description: KMS key for Kinesis stream encryption
+      EnableKeyRotation: true
       KeyPolicy:
         Version: '2012-10-17'
         Statement:
@@ -251,9 +299,24 @@ Resources:
           MinimumProtocolVersion: TLSv1.2_2021
         PriceClass: PriceClass_100
 
+  # Secrets Manager Secret for InfluxDB Password
+  InfluxDBPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}-influxdb-password'
+      Description: 'InfluxDB admin password'
+      SecretString: !Sub |
+        {
+          "username": "admin",
+          "password": "${InfluxDBPassword}"
+        }
+      KmsKeyId: !Ref SecretsManagerKMSKey
+
   # Timestream for InfluxDB
   InfluxDBInstance:
     Type: AWS::Timestream::InfluxDBInstance
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
     Properties:
       Name: !Ref DatabaseName
       DbInstanceType: db.influx.medium
@@ -261,7 +324,7 @@ Resources:
       Bucket: !Ref TableName
       Organization: cmcd-org
       Username: admin
-      Password: TempPassword123
+      Password: !Ref InfluxDBPassword
       VpcSubnetIds:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
@@ -422,6 +485,7 @@ Resources:
     Type: AWS::KMS::Key
     Properties:
       Description: KMS key for Secrets Manager encryption
+      EnableKeyRotation: true
       KeyPolicy:
         Version: '2012-10-17'
         Statement:
@@ -507,7 +571,7 @@ Resources:
           - Effect: Allow
             Action:
               - secretsmanager:GetSecretValue
-            Resource: !Ref InfluxDBSecret
+            Resource: !Ref InfluxDBPasswordSecret
           - Effect: Allow
             Action:
               - kms:Decrypt
@@ -543,8 +607,10 @@ Resources:
       Roles:
         - !Ref BastionRole
 
-  # Bastion Host EC2 Instance
-  BastionHost:
+
+
+  # New Bastion Host EC2 Instance
+  NewBastionHost:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: ami-09e6f87a47903347c # Amazon Linux 2023 AMI (update for your region)
@@ -571,7 +637,7 @@ Resources:
           # Create connection script
           cat > /home/ec2-user/connect-influxdb.sh << 'EOF'
           #!/bin/bash
-          SECRET_VALUE=$(aws secretsmanager get-secret-value --secret-id ${InfluxDBSecret} --query SecretString --output text --region ${AWS::Region})
+          SECRET_VALUE=$(aws secretsmanager get-secret-value --secret-id ${InfluxDBPasswordSecret} --query SecretString --output text --region ${AWS::Region})
           PASSWORD=$(echo $SECRET_VALUE | jq -r .password)
           INFLUXDB_ENDPOINT="${InfluxDBInstance.Endpoint}"
           
@@ -587,7 +653,19 @@ Resources:
           chown ec2-user:ec2-user /home/ec2-user/connect-influxdb.sh
       Tags:
         - Key: Name
-          Value: CMCD-Bastion-Host
+          Value: CMCD-New-Bastion-Host
+
+  # Managed Policy for Lambda VPC access (DescribeNetworkInterfaces doesn't support resource-level permissions)
+  LambdaVPCAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:DescribeNetworkInterfaces
+            Resource: '*'
 
   # Lambda Execution Role
   LambdaExecutionRole:
@@ -602,6 +680,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaKinesisExecutionRole
+        - !Ref LambdaVPCAccessPolicy
       Policies:
         - PolicyName: InfluxDBAccessPolicy
           PolicyDocument:
@@ -613,7 +692,7 @@ Resources:
                   - secretsmanager:GetSecretValue
                 Resource: 
                   - !Sub 'arn:aws:timestream:${AWS::Region}:${AWS::AccountId}:influxdb-instance/${InfluxDBInstance}'
-                  - !Ref InfluxDBSecret
+                  - !Ref InfluxDBPasswordSecret
               - Effect: Allow
                 Action:
                   - ec2:CreateNetworkInterface
@@ -625,13 +704,11 @@ Resources:
                   - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${LambdaSecurityGroup}'
               - Effect: Allow
                 Action:
-                  - ec2:DescribeNetworkInterfaces
-                Resource: '*'  # DescribeNetworkInterfaces requires wildcard as it doesn't support resource-level permissions
-              - Effect: Allow
-                Action:
                   - kms:Decrypt
                   - kms:DescribeKey
-                Resource: !GetAtt KinesisKMSKey.Arn
+                Resource: 
+                  - !GetAtt KinesisKMSKey.Arn
+                  - !GetAtt SecretsManagerKMSKey.Arn
 
   # Lambda Function
   CMCDProcessorLambda:
@@ -847,7 +924,8 @@ Resources:
           INFLUXDB_ENDPOINT: !Sub 'https://${InfluxDBInstance.Endpoint}:8086'
           INFLUXDB_ORG: cmcd-org
           INFLUXDB_BUCKET: !Ref TableName
-          INFLUXDB_TOKEN: !Sub '{{resolve:secretsmanager:${InfluxDBSecret}:SecretString:password}}'
+          INFLUXDB_TOKEN: !Ref InfluxDBToken
+      KmsKeyArn: !GetAtt SecretsManagerKMSKey.Arn
       Timeout: 60
 
   # Event Source Mapping
@@ -896,13 +974,20 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-S3BucketName'
 
+
+  InfluxDBPasswordSecretArn:
+    Description: ARN of the Secrets Manager secret containing InfluxDB password
+    Value: !Ref InfluxDBPasswordSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-InfluxDBPasswordSecretArn'
+  
   BastionHostInstanceId:
     Description: Instance ID of the Bastion Host
-    Value: !Ref BastionHost
+    Value: !Ref NewBastionHost
   
   SessionManagerCommand:
     Description: Command to connect to bastion host via Session Manager
-    Value: !Sub 'aws ssm start-session --target ${BastionHost} --region ${AWS::Region}'
+    Value: !Sub 'aws ssm start-session --target ${NewBastionHost} --region ${AWS::Region}'
   
   InfluxDBConnectionScript:
     Description: Script location on bastion host to get InfluxDB connection details
