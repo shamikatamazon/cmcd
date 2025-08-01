@@ -89,31 +89,26 @@ Resources:
     Properties:
       Bucket: !Ref ContentBucket
       PolicyDocument:
-        Version: '2012-10-17'
         Statement:
-          - Sid: AllowCloudFrontServicePrincipalReadWrite
-            Effect: Allow
+          - Effect: Allow
             Principal:
               Service: cloudfront.amazonaws.com
-            Action:
-              - s3:GetObject
-              - s3:PutObject
-            Resource: !Sub '${ContentBucket}/*'
+            Action: s3:GetObject
+            Resource: !Sub 
+              - '${BucketArn}/*'
+              - BucketArn: 
+                  Fn::Sub:
+                    - 'arn:aws:s3:::${BucketName}'
+                    - BucketName:
+                        !Ref ContentBucket
             Condition:
               StringEquals:
-                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CMCDCloudFrontDistribution}'
-          - Sid: AllowAccountUsersAccess
-            Effect: Allow
-            Principal:
-              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
-            Action:
-              - s3:GetObject
-              - s3:PutObject
-              - s3:DeleteObject
-              - s3:ListBucket
-            Resource:
-              - !Sub '${ContentBucket}/*'
-              - !GetAtt ContentBucket.Arn
+                'AWS:SourceArn': !Sub 
+                  - 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistributionId}'
+                  - DistributionId:
+                      !Sub '${AWS::StackName}-CloudFrontDistributionId'
+
+  
 
   # Origin Access Control for CloudFront
   OriginAccessControl:
@@ -655,7 +650,7 @@ Resources:
         - Key: Name
           Value: CMCD-New-Bastion-Host
 
-  # Managed Policy for Lambda VPC access (DescribeNetworkInterfaces doesn't support resource-level permissions)
+  # Managed Policy for Lambda VPC access (these actions don't support resource-level permissions)
   LambdaVPCAccessPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -665,6 +660,7 @@ Resources:
           - Effect: Allow
             Action:
               - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
             Resource: '*'
 
   # Lambda Execution Role
@@ -696,7 +692,6 @@ Resources:
               - Effect: Allow
                 Action:
                   - ec2:CreateNetworkInterface
-                  - ec2:DeleteNetworkInterface
                 Resource: 
                   - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*'
                   - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${PrivateSubnet1}'
