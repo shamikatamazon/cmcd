@@ -387,6 +387,34 @@ Contributions are welcome! Please ensure:
 3. Error handling is comprehensive
 4. Tests cover new functionality
 
+## Security Considerations
+
+⚠️ **Important Security Notice**
+
+This sample is provided for demonstration and educational purposes only. **It is not recommended for production deployment without significant security hardening and customization.**
+
+### Before Production Use:
+
+- **Review and adapt all security configurations** to meet your organization's security standards and compliance requirements
+- **Change all default passwords and credentials** - The template includes placeholder passwords that must be updated
+- **Implement proper network segmentation** and review all security group rules for your specific use case
+- **Enable comprehensive logging and monitoring** beyond what's provided in this sample
+- **Conduct thorough security testing** including penetration testing and vulnerability assessments
+- **Review IAM permissions** and apply the principle of least privilege for your specific requirements
+- **Implement proper backup and disaster recovery** procedures for production data
+- **Ensure compliance** with relevant industry standards and regulations (SOC 2, GDPR, HIPAA, etc.)
+
+### Security Features Included:
+
+- KMS encryption for S3, Kinesis, and Secrets Manager
+- WAF protection for CloudFront distribution
+- VPC isolation for InfluxDB instance
+- Secrets Manager for credential management with rotation
+- TLS 1.2 minimum for CloudFront
+- Private subnets for sensitive resources
+
+**This sample should be thoroughly reviewed, tested, and customized by qualified security professionals before any production use.**
+
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
